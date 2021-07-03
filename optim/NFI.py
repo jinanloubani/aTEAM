@@ -12,17 +12,13 @@ class NumpyFunctionInterface(ParamGroupsManager):
     """
     Interfaces class for representing torch forward & backward procedures 
            as Numpy functions. 
-           `NumpyFunctionInterface` contains two part of compositions: 
-           which are parameters group manager 
-           (see docstrings of `ParamGroupsManager`)
-           and numpy function interface 
-           (pls refer to aTEAM/test/optim_quickstart.py).
 
     .. warning::
-    If self.always_refresh=False, and you are going to change options of one 
-        of the param_groups, please use self.set_options. This is because, for 
+    If you are going to change options of one of self.param_groups with 
+        always_refresh=False, please use self.set_options. This is because, for 
         example, any changes on 'grad_proj's will have impact on self.fprime(x), 
-        even for the same input x; so do any changes on 'isfrozen's, 'x_proj's. 
+        even for the same input x; so do 'isfrozen's, 'x_proj's. So do changes 
+        on 'x_proj's, 'isfrozen's.
 
     .. warning::
     Right now all parameters have to be dense Variable and their dtype 
@@ -33,35 +29,32 @@ class NumpyFunctionInterface(ParamGroupsManager):
         params (iterable): See ParamGroupsManager.__doc__
         forward (callable): callable forward(**kw)
             torch forward procedure, return a :class:`torch.Tensor`
-        always_refresh (bool): If always_refresh=True, then any changes on 
-            forward & backward procedure is OK. We recommand you to set 
-            always_refresh=True unless you are familiar with 
-            :class:`NumpyFunctionInterface`.
-            When always_refresh=False, NumpyFunctionInterface will cache 
-            parameters for fast forward & backward.
-        >>>> set default options for parameter groups >>>> 
-            # Each parameter group will have its own options dict,
-            # (see ParamGroupsManager.__doc__)
-            # A special option for idx-th param_group can be set up by calling 
-            #       self.set_options(idx, optionsdict)
-            # e.g., self.set_options(0, {'x_proj':x_proj})
         isfrozen (bool): whether parameters should be frozen, if you set 
             isfrozen=True, as a result, grad of this param_group would be 
             set to be 0 after calling self.fprime(x).
         x_proj (callable): callable x_proj(param_group['params']). 
-            It is similar to nn.module.register_forward_pre_hook(x_proj)
+            It is similar to nn.module.register_forward_pre_hook(x_proj) but 
+            they are not have to be the same. Each time you call 
+            self.set_options(idx,{'x_proj':x_proj}), self._x_cache will be 
+            set to be None.
             It can be used to make parameters to satisfied linear constraint. 
             Wether isfrozen or not, x_proj&grad_proj will go their own way.
         grad_proj (callable): callable grad_proj(param_group['params']).
             It is similar to nn.module.register_backward_hook(grad_proj).
             grad_proj(param_group['params']) should project gradients of 
             param_group['params'] to the constrained linear space if needed.
+        always_refresh (bool): If always_refresh=True, then any changes on 
+            forward & backward procedure is OK. We recommand you to set 
+            always_refresh=True unless you are familiar with 
+            :class:`NumpyFunctionInterface`.
+            When always_refresh=False, NumpyFunctionInterface will cache 
+            parameters for fast forward & backward.
         **kw (keyword args): other options for parameter groups
-        <<<< set default options for parameter groups <<<<
     """
 
-    def __init__(self, params, forward, always_refresh=True, *, 
-            isfrozen=False, x_proj=None, grad_proj=None, **kw):
+    def __init__(self, params, forward, *, 
+            isfrozen=False, x_proj=None, grad_proj=None, always_refresh=True, 
+            **kw):
         defaults = dict(isfrozen=isfrozen, 
                 x_proj=x_proj, grad_proj=grad_proj, **kw)
         super(NumpyFunctionInterface, self).__init__(params, defaults)
@@ -116,8 +109,8 @@ class NumpyFunctionInterface(ParamGroupsManager):
     def forward(self):
         """
         A safe way to get access of self._forward.
-        When you use property NumpyFunctionInterface.forward, after 
-        doing some modifications on self._forward, like: 
+        When you use property NumpyFunctionInterface.forward, I expect you are 
+        going to do some modifications on self._forward, like: 
             self.forward.property = value
         in this case, we should call self.options_refresh() to keep self.f and 
         self.fprime safe. 
@@ -193,10 +186,6 @@ class NumpyFunctionInterface(ParamGroupsManager):
         if self._loss is None or not np.array_equal(_x_cache, self._x_cache):
             self._x_cache = _x_cache
             self._loss = self._forward()
-            if torch.isnan(self._loss):
-                self._loss = (torch.ones(1,
-                    requires_grad=self._loss.requires_grad)/
-                    torch.zeros(1)).to(loss)
             self._need_backward = True
         return self._loss.item()
     def fprime(self, x, always_double=True, *args, **kw):
